@@ -23,6 +23,16 @@ python3 -m http.server 4210
 
 puis ouvre <http://localhost:4210>.
 
+## Les mains sur les téléphones 📱
+
+Pour le **Président** et **Chroma**, chaque joueur humain peut avoir ses cartes sur son téléphone :
+
+1. Dans l'écran de configuration, laisse coché « Mains sur les téléphones ».
+2. L'ordinateur affiche un QR code : chaque joueur le scanne et choisit son nom.
+3. La table (pioche, défausse, plis) reste sur l'ordinateur ; chacun joue depuis son téléphone.
+
+Il faut une connexion internet sur l'ordinateur et sur les téléphones (pas besoin d'être sur le même Wi-Fi), et que le site soit en ligne : le QR code ouvre l'adresse indiquée dans `js/config.js` (`publicUrl`). La liaison est directe entre les appareils (WebRTC, via PeerJS pour la mise en relation). Sans connexion, le jeu repasse en mode « passe l'ordinateur ».
+
 ## Fonctionnement
 
 - **Graine aléatoire à chaque partie** : chaque partie tire une nouvelle graine (affichée en haut à droite, clic pour la copier). Tu peux en saisir une dans l'écran de configuration pour rejouer exactement la même distribution / les mêmes dés.
@@ -40,7 +50,10 @@ js/ui.js               animations de vol, modales, écran de passage
 js/cards.js            rendu des cartes (52 cartes + Chroma)
 js/seats.js            placement des joueurs, main en éventail
 js/games/*.js          un fichier par jeu
+js/net.js              salon et liaison ordinateur ↔ téléphones
+js/phone.js            page téléphone (phone.html) : la main du joueur
+js/config.js           adresse publique du site (pour le QR code)
 js/app.js              menu, configuration, lancement
 ```
 
-Tout est en HTML/CSS/JavaScript pur. Les cartes et les dés sont dessinés en CSS : aucune image ni ressource tierce.
+Tout est en HTML/CSS/JavaScript pur, sans étape de build. Les cartes et les dés sont dessinés en CSS. Deux bibliothèques sont chargées depuis un CDN pour le mode téléphone : PeerJS et qrcode-generator.

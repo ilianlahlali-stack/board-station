@@ -28,6 +28,7 @@
       <div id="hud-title" class="hud-title"></div>
       <div class="hud-right">
         <span id="hud-seed" class="seed-badge" title="Graine de la partie"></span>
+        <button id="btn-qr" class="hud-btn hidden" type="button">📱 QR</button>
         <button id="btn-rules" class="hud-btn" type="button">Règles</button>
         <button id="btn-restart" class="hud-btn" type="button">Nouvelle partie</button>
       </div>
@@ -41,11 +42,15 @@
 <div id="modal-root"></div>
 <div id="toast-root"></div>
 
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="js/config.js"></script>
 <script src="js/rng.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/cards.js"></script>
 <script src="js/seats.js"></script>
+<script src="js/net.js"></script>
 <script src="js/games/dice421.js"></script>
 <script src="js/games/president.js"></script>
 <script src="js/games/chroma.js"></script>

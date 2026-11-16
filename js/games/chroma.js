@@ -38,9 +38,11 @@ Games.chroma = (() => {
     const n = P.length;
     const scores = P.map(() => 0);
     let hands = [], draw = [], discard = [], color = 'r', dir = 1;
-    let current = -1, viewer = Math.max(0, P.findIndex(p => !p.bot));
+    const net = ctx.net, remote = !!net;   // mains sur les téléphones
+    let current = -1, viewer = remote ? -1 : Math.max(0, P.findIndex(p => !p.bot));
+    let statusText = '', pendingColor = null;
     let handVisible = false, bubbles = [], onChoice = null, drawnCard = null, called = false;
-    const multiHuman = ctx.humans() > 1;
+    const multiHuman = !remote && ctx.humans() > 1;
 
     table.innerHTML = `
       <div class="cg-status"></div>
@@ -67,7 +69,7 @@ Games.chroma = (() => {
     const btnDraw = q('.cg-draw'), btnPass = q('.cg-pass'), btnCall = q('.cg-call');
     let seatMap = {};
 
-    const setStatus = h => { q('.cg-status').innerHTML = h; };
+    const setStatus = h => { statusText = h; q('.cg-status').innerHTML = h; };
     const topCard = () => discard[discard.length - 1];
     const canPlay = c => c.color === 'w' || c.color === color ||
       (c.kind === topCard().kind && (c.kind !== 'num' || c.value === topCard().value));
@@ -104,6 +106,11 @@ Games.chroma = (() => {
         badges: P.map((_, i) => (scores[i] ? scores[i] + ' pts' : '')),
         bubbles, backTheme: 'chroma',
       });
+      renderPile();
+      q('.cg-center').dataset.color = color;
+      q('.cg-ring').classList.toggle('ccw', dir === -1);
+      q('.cg-info').innerHTML = discard.length ? `Couleur : <b class="col-${color}">${Cards.CH_COLORS[color]}</b>` : '';
+      if (remote) { pushPhones(); return; }
       const me = P[viewer];
       q('.cg-me-plate').innerHTML =
         `<span class="seat-name">${me.bot ? '🤖 ' : ''}${esc(me.name)}</span>` +
@@ -123,10 +130,6 @@ Games.chroma = (() => {
         return node;
       });
       Seats.fan(handEl, nodes);
-      renderPile();
-      q('.cg-center').dataset.color = color;
-      q('.cg-ring').classList.toggle('ccw', dir === -1);
-      q('.cg-info').innerHTML = discard.length ? `Couleur : <b class="col-${color}">${Cards.CH_COLORS[color]}</b>` : '';
       btnDraw.disabled = !myTurn || !!drawnCard;
       btnPass.hidden = !(myTurn && drawnCard);
       btnDraw.hidden = !!(myTurn && drawnCard);
@@ -134,6 +137,42 @@ Games.chroma = (() => {
       btnCall.classList.toggle('on', called);
       deckEl.classList.toggle('clickable', myTurn && !drawnCard);
       q('.cg-actions').classList.toggle('hidden-actions', !myTurn);
+    }
+
+    /* Envoie à chaque téléphone l'état de sa main. */
+    function pushPhones() {
+      const players = P.map((p, i) => ({ name: p.name, count: hands[i] ? hands[i].length : 0, current: i === current, note: bubbles[i] || '' }));
+      P.forEach((p, i) => {
+        if (p.bot) return;
+        const hand = (hands[i] || []).slice().sort((a, b) => sortKey(a) - sortKey(b));
+        const turn = i === current && !!onChoice;
+        const ok = turn ? hand.filter(c => canPlay(c) && (!drawnCard || drawnCard === c)).map(c => c.id) : [];
+        net.send(i, {
+          t: 'state', mode: 'chroma', game: 'Chroma', name: p.name, badge: scores[i] ? scores[i] + ' pts' : '',
+          hand, turn, playable: ok, canDraw: turn && !drawnCard, canPass: turn && !!drawnCard,
+          canCall: turn && hand.length === 2 && ok.length > 0, called: turn && called,
+          color, top: discard.length ? topCard() : null,
+          prompt: pendingColor && pendingColor.idx === i ? 'color' : null,
+          status: statusText.replace(/<[^>]+>/g, ''), players,
+        });
+      });
+    }
+    if (remote) {
+      net.handler = (i, a) => {
+        if (!ctx.alive) return;
+        if (a.type === 'color') {
+          if (pendingColor && pendingColor.idx === i && COLORS.includes(a.color)) { const f = pendingColor.res; pendingColor = null; f(a.color); }
+          return;
+        }
+        if (i !== current || !onChoice) return;
+        if (a.type === 'call') { if (hands[i].length === 2) { called = true; bubbles[i] = 'Chroma !'; Sfx.win(); render(); } return; }
+        if (a.type === 'draw' && !drawnCard) choose({ type: 'draw' });
+        else if (a.type === 'pass' && drawnCard) choose({ type: 'pass' });
+        else if (a.type === 'play') {
+          const card = hands[i].find(c => c.id === a.id);
+          if (card && canPlay(card) && (!drawnCard || drawnCard === card)) choose({ type: 'play', card });
+        }
+      };
     }
 
     function choose(v) { if (!onChoice) return; const f = onChoice; onChoice = null; f(v); }
@@ -185,7 +224,8 @@ Games.chroma = (() => {
       if (card.color !== 'w') color = card.color;
     }
 
-    function pickColor() {
+    function pickColor(i) {
+      if (remote) return new Promise(res => { pendingColor = { idx: i, res }; setStatus(`<b>${esc(P[i].name)}</b> choisit une couleur…`); render(); });
       return new Promise(res => {
         const body = el('div', 'color-pick');
         COLORS.forEach(c => {
@@ -216,7 +256,7 @@ Games.chroma = (() => {
     }
 
     async function reveal(i) {
-      if (P[i].bot) return;
+      if (P[i].bot || remote) return;
       if (multiHuman && (viewer !== i || !handVisible)) {
         handVisible = false; viewer = i; render();
         await ctx.w(UI.handoff(P[i].name));
@@ -243,7 +283,7 @@ Games.chroma = (() => {
       await ctx.w(Promise.all(jobs));
       hands = real;
       handVisible = !multiHuman;
-      hands[viewer].sort((x, y) => sortKey(x) - sortKey(y));
+      if (!remote) hands[viewer].sort((x, y) => sortKey(x) - sortKey(y));
       // La première carte de la défausse doit être un chiffre.
       let first = draw.pop();
       while (first.kind !== 'num') { draw.unshift(first); first = draw.pop(); }
@@ -280,6 +320,7 @@ Games.chroma = (() => {
           setStatus(`<b>${esc(p.name)}</b>, à toi : pose une carte ou pioche.`);
           let c = await ctx.w(new Promise(res => { onChoice = res; render(); }));
           if (c.type === 'draw') {
+            setStatus(`<b>${esc(p.name)}</b> pioche.`);
             render();
             const got = await drawCards(i, 1);
             if (got[0] && canPlay(got[0])) {
@@ -303,7 +344,7 @@ Games.chroma = (() => {
           await playCard(i, card);
           if (card.color === 'w') {
             render();
-            color = p.bot ? botColor(i) : await ctx.w(pickColor());
+            color = p.bot ? botColor(i) : await ctx.w(pickColor(i));
           }
           render();
           if (hands[i].length === 0) return i;
@@ -360,5 +401,5 @@ Games.chroma = (() => {
     })();
   }
 
-  return { id: 'chroma', name: 'Chroma', tagline: 'Couleurs, blocages, +2 et Prismes : le jeu de défausse coloré, avec des cartes originales.', min: 2, max: 6, defaultPlayers: 4, rules, preview, start };
+  return { id: 'chroma', remote: true, name: 'Chroma', tagline: 'Couleurs, blocages, +2 et Prismes : le jeu de défausse coloré, avec des cartes originales.', min: 2, max: 6, defaultPlayers: 4, rules, preview, start };
 })();

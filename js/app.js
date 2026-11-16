@@ -78,7 +78,18 @@
       });
     }
     paint();
-    body.append(count, list, seedRow);
+    body.append(count, list);
+    let phones = null;
+    if (game.remote) {
+      if (cfg.phones == null) cfg.phones = true;
+      const row = el('label', 'setup-phones',
+        '<input type="checkbox"><span><b>📱 Mains sur les téléphones</b><small>Chaque joueur humain scanne un QR code et voit ses cartes sur son téléphone.</small></span>');
+      phones = row.querySelector('input');
+      phones.checked = !!cfg.phones;
+      phones.addEventListener('change', () => { cfg.phones = phones.checked; });
+      body.append(row);
+    }
+    body.append(seedRow);
 
     UI.modal({
       title: game.name,
@@ -93,13 +104,61 @@
       cfg.players.forEach((p, i) => { p.name = (p.name || '').trim() || `Joueur ${i + 1}`; });
       saveConfig(game, cfg);
       const typed = RNG.parseSeed(seedRow.querySelector('input').value);
-      startGame(game, cfg, typed);
+      if (game.remote && cfg.phones && cfg.players.some(p => !p.bot)) openLobby(game, cfg, typed);
+      else startGame(game, cfg, typed, null);
     });
   }
 
+  /* ---------- Salon : les téléphones rejoignent la partie ---------- */
+  async function openLobby(game, cfg, seed) {
+    const fallback = msg => { UI.closeModal(); UI.toast(msg, 4200); startGame(game, cfg, seed, null); };
+    if (!Net.available()) return fallback('Pas de connexion internet : les mains restent sur cet écran.');
+    UI.modal({ title: game.name, body: '<p>Ouverture du salon…</p>', buttons: [] });
+    let room;
+    try {
+      room = await Promise.race([
+        Net.host(cfg.players.map(p => ({ name: p.name, bot: p.bot })), game.name),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 12000)),
+      ]);
+    } catch (e) {
+      return fallback('Impossible d\'ouvrir le salon : les mains restent sur cet écran.');
+    }
+    const v = await lobbyModal(room, true);
+    if (v === 'start') startGame(game, cfg, seed, room);
+    else room.close();
+  }
+
+  function lobbyModal(room, canStart) {
+    const body = el('div', 'lobby');
+    const qr = el('div', 'lobby-qr', Net.qrSvg(room.url) || '<p>QR code indisponible.</p>');
+    const side = el('div', 'lobby-side');
+    side.innerHTML = `<p>Chaque joueur scanne ce QR code avec l'appareil photo de son téléphone, puis choisit son nom.</p>
+      <div class="lobby-list"></div><a class="lobby-url" href="${esc(room.url)}" target="_blank" rel="noopener">${esc(room.url)}</a>`;
+    body.append(qr, side);
+    const paint = () => {
+      const listEl = side.querySelector('.lobby-list');
+      if (!listEl.isConnected && listEl !== side.querySelector('.lobby-list')) return;
+      listEl.innerHTML = room.humans().map(i =>
+        `<div class="lobby-row${room.connected(i) ? ' ok' : ''}"><span>${esc(room.players[i].name)}</span><b>${room.connected(i) ? '✓ Connecté' : 'En attente…'}</b></div>`).join('');
+      const go = document.querySelector('.modal .btn.primary');
+      if (go && canStart) go.disabled = !room.allReady();
+    };
+    const prev = room.onChange;
+    room.onChange = () => { paint(); if (prev) prev(); };
+    const pr = UI.modal({
+      title: canStart ? 'Rejoignez la partie' : 'QR code de la partie',
+      body, wide: true, dismissable: !canStart,
+      buttons: canStart
+        ? [{ label: 'Annuler', value: 'cancel' }, { label: 'Commencer', primary: true, value: 'start', validate: () => room.allReady() }]
+        : [{ label: 'Fermer', primary: true, value: 'close' }],
+    });
+    paint();
+    return pr.then(v => { room.onChange = prev; return v; });
+  }
+
   /* ---------- Partie ---------- */
-  function startGame(game, cfg, fixedSeed) {
-    stopSession();
+  function startGame(game, cfg, fixedSeed, room) {
+    stopSession(room);
     const seed = fixedSeed != null ? fixedSeed : RNG.newSeed();
     const ctx = {
       alive: true,
@@ -110,20 +169,38 @@
       w(promise) { return new Promise(res => promise.then(v => { if (ctx.alive) res(v); })); },
       sleep(ms) { return ctx.w(UI.sleep(ms)); },
       humans() { return ctx.players.filter(p => !p.bot).length; },
+      net: room || null,
     };
-    session = { game, ctx, cfg };
+    session = { game, ctx, cfg, room: room || null };
+    $('btn-qr').classList.toggle('hidden', !room);
+    if (room) {
+      room.handler = null;
+      let was = room.humans().filter(room.connected);
+      room.onChange = () => {
+        const now = room.humans().filter(room.connected);
+        was.filter(i => !now.includes(i)).forEach(i => UI.toast(`📱 ${esc(room.players[i].name)} est déconnecté — bouton « QR » pour se reconnecter.`, 4000));
+        now.filter(i => !was.includes(i)).forEach(i => UI.toast(`📱 ${esc(room.players[i].name)} est connecté.`));
+        was = now;
+      };
+    }
     $('menu').classList.add('hidden');
     $('game').classList.remove('hidden');
     $('hud-title').textContent = game.name;
     $('hud-seed').textContent = '🎲 ' + RNG.seedToString(seed);
     const table = $('table');
     table.innerHTML = '';
-    table.className = 'table table-' + game.id;
+    table.className = 'table table-' + game.id + (room ? ' remote' : '');
     game.start(table, ctx);
   }
 
-  function stopSession() {
-    if (session) session.ctx.alive = false;
+  function stopSession(keepRoom) {
+    if (session) {
+      session.ctx.alive = false;
+      if (session.room && session.room !== keepRoom) {
+        session.room.humans().forEach(i => session.room.send(i, { t: 'end' }));
+        const r = session.room; setTimeout(() => r.close(), 400);
+      }
+    }
     session = null;
     UI.closeModal();
     $('fx-layer').innerHTML = '';
@@ -141,7 +218,12 @@
     if (!session) return;
     Sfx.click();
     const { game, cfg } = session;
-    startGame(game, cfg, null);
+    startGame(game, cfg, null, session.room);
+  });
+  $('btn-qr').addEventListener('click', () => {
+    if (!session || !session.room || document.getElementById('modal-root').children.length) return;
+    Sfx.click();
+    lobbyModal(session.room, false);
   });
   $('btn-rules').addEventListener('click', () => {
     if (!session) return;

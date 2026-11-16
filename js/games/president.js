@@ -37,12 +37,14 @@ Games.president = (() => {
     let titles = null;            // position de la manche précédente, par joueur
     let hands = [], finished = [], passed = new Set();
     let top = null;               // { rank, count }
-    let current = -1, viewer = Math.max(0, P.findIndex(p => !p.bot));
+    const net = ctx.net, remote = !!net;   // mains sur les téléphones
+    let current = -1, viewer = remote ? -1 : Math.max(0, P.findIndex(p => !p.bot));
+    let statusText = '';
     let handVisible = false;
     let bubbles = [];
     let selection = new Set();
     let onChoice = null;
-    const multiHuman = ctx.humans() > 1;
+    const multiHuman = !remote && ctx.humans() > 1;
 
     table.innerHTML = `
       <div class="cg-status"></div>
@@ -61,7 +63,7 @@ Games.president = (() => {
     const btnPlay = q('.cg-play'), btnPass = q('.cg-pass');
     let seatMap = {};
 
-    const setStatus = h => { q('.cg-status').innerHTML = h; };
+    const setStatus = h => { statusText = h; q('.cg-status').innerHTML = h; };
     const sortHand = h => h.sort((a, b) => (a.rank - b.rank) || a.suit.localeCompare(b.suit));
     const badge = i => (titles ? titleFor(titles[i], n) : '');
 
@@ -88,7 +90,9 @@ Games.president = (() => {
       return card.rank >= top.rank && countOf(card.rank) >= top.count;
     }
     function selectionValid() {
-      const sel = hands[viewer].filter(c => selection.has(c.id));
+      return validPlay(hands[viewer].filter(c => selection.has(c.id)));
+    }
+    function validPlay(sel) {
       if (!sel.length || sel.some(c => c.rank !== sel[0].rank)) return false;
       if (!top) return true;
       return sel.length === top.count && sel[0].rank >= top.rank;
@@ -101,6 +105,10 @@ Games.president = (() => {
         badges: P.map((_, i) => badge(i)),
         bubbles, out: P.map((_, i) => finished.includes(i)),
       });
+      q('.cg-info').innerHTML = top
+        ? `À battre : <b>${top.count > 1 ? top.count + ' × ' : ''}${Cards.label(top.rank)}</b>`
+        : (current >= 0 ? 'Nouveau pli' : '');
+      if (remote) { pushPhones(); return; }
       const me = P[viewer];
       q('.cg-me-plate').innerHTML =
         `<span class="seat-name">${me.bot ? '🤖 ' : ''}${esc(me.name)}</span>` +
@@ -125,9 +133,31 @@ Games.president = (() => {
       btnPlay.disabled = !myTurn || !selectionValid();
       btnPass.disabled = !myTurn || !top;
       q('.cg-actions').classList.toggle('hidden-actions', !myTurn);
-      q('.cg-info').innerHTML = top
-        ? `À battre : <b>${top.count > 1 ? top.count + ' × ' : ''}${Cards.label(top.rank)}</b>`
-        : (current >= 0 ? 'Nouveau pli' : '');
+    }
+
+    /* Envoie à chaque téléphone l'état de sa main. */
+    function pushPhones() {
+      const players = P.map((p, i) => ({ name: p.name, count: hands[i] ? hands[i].length : 0, current: i === current, note: bubbles[i] || '' }));
+      P.forEach((p, i) => {
+        if (p.bot) return;
+        net.send(i, {
+          t: 'state', mode: 'president', game: 'Président', name: p.name, badge: badge(i),
+          hand: hands[i] || [], turn: i === current && !!onChoice, top,
+          done: finished.includes(i), status: statusText.replace(/<[^>]+>/g, ''), players,
+        });
+      });
+    }
+    if (remote) {
+      net.handler = (i, a) => {
+        if (!ctx.alive || i !== current || !onChoice) return;
+        let choice = null;
+        if (a.type === 'pass' && top) choice = { type: 'pass' };
+        if (a.type === 'play' && Array.isArray(a.ids)) {
+          const cards = hands[i].filter(c => a.ids.includes(c.id));
+          if (cards.length === a.ids.length && validPlay(cards)) choice = { type: 'play', cards };
+        }
+        if (choice) { const f = onChoice; onChoice = null; f(choice); }
+      };
     }
 
     function clickCard(card) {
@@ -215,7 +245,7 @@ Games.president = (() => {
     }
 
     async function reveal(i) {
-      if (P[i].bot) return;
+      if (P[i].bot || remote) return;
       if (multiHuman && (viewer !== i || !handVisible)) {
         handVisible = false; viewer = i; render();
         await ctx.w(UI.handoff(P[i].name));
@@ -292,6 +322,7 @@ Games.president = (() => {
           setStatus(top ? `<b>${esc(p.name)}</b> : joue ${top.count > 1 ? top.count + ' cartes' : 'une carte'} ≥ ${Cards.label(top.rank)}, ou passe.`
             : `<b>${esc(p.name)}</b> ouvre le pli : pose 1 à 4 cartes de même valeur.`);
           choice = await ctx.w(new Promise(res => { onChoice = res; render(); }));
+          if (remote) render();
         }
         selection.clear();
 
@@ -356,5 +387,5 @@ Games.president = (() => {
     })();
   }
 
-  return { id: 'president', name: 'Président', tagline: 'Débarrasse-toi de tes cartes et prends le pouvoir. Jeu classique de 52 cartes.', min: 3, max: 6, defaultPlayers: 4, rules, preview, start };
+  return { id: 'president', remote: true, name: 'Président', tagline: 'Débarrasse-toi de tes cartes et prends le pouvoir. Jeu classique de 52 cartes.', min: 3, max: 6, defaultPlayers: 4, rules, preview, start };
 })();

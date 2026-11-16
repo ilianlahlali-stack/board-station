@@ -18,11 +18,14 @@ const Seats = (() => {
     const { players, viewer, current, counts, badges = [], bubbles = [], backTheme = 'classic', out = [] } = opts;
     layer.innerHTML = '';
     const n = players.length;
-    const pos = positions(n - 1);
+    /* viewer < 0 : personne n'a sa main à l'écran, tous les joueurs sont autour de la table. */
+    const all = viewer < 0;
+    const count = all ? n : n - 1;
+    const pos = positions(count);
     const map = {};
-    for (let k = 1; k < n; k++) {
-      const idx = (viewer + k) % n;
-      const [x, y] = pos[k - 1];
+    for (let k = 0; k < count; k++) {
+      const idx = all ? k : (viewer + 1 + k) % n;
+      const [x, y] = pos[k];
       const seat = el('div', 'seat' + (idx === current ? ' active' : '') + (out[idx] ? ' out' : ''));
       seat.style.left = x + '%'; seat.style.top = y + '%';
       seat.dataset.idx = idx;
