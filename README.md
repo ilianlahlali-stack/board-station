@@ -10,18 +10,16 @@ Une table de jeux de société dans le navigateur, pour jouer **au tour par tour
 
 ## Jouer
 
-Aucune installation, aucune dépendance :
+**👉 https://ilianlahlali-stack.github.io/board-station/**
 
-1. Télécharge le dépôt (`Code → Download ZIP`, ou `git clone`).
-2. Ouvre `index.html` dans ton navigateur (double-clic).
+Ouvre ce lien dans un navigateur, c'est tout : rien à télécharger, rien à installer.
 
-Ou, si tu préfères un petit serveur local :
+<details>
+<summary>Jouer hors ligne (optionnel)</summary>
 
-```bash
-python3 -m http.server 4210
-```
+Télécharge le dépôt (`Code → Download ZIP`, ou `git clone`) puis ouvre `index.html` dans ton navigateur. Le mode « mains sur les téléphones » a quand même besoin d'internet.
 
-puis ouvre <http://localhost:4210>.
+</details>
 
 ## Les mains sur les téléphones 📱
 
